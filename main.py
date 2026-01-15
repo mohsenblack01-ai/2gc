@@ -1,33 +1,34 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, redirect
 from instagrapi import Client
+from instagrapi.exceptions import ChallengeRequired, FeedbackRequired, PleaseWaitFewMinutes, ClientError
 import threading
 import time
 import random
 import os
 
 app = Flask(__name__)
-app.secret_key = "sujal_hawk_2gc_2025"
+app.secret_key = "sujal_hawk_2id_2025"
 
-# Global state
+# Global
 status = {"running": False, "sent": 0, "logs": [], "text": "Ready"}
 cfg = {
-    "sessionid": "",
-    "thread_id_1": "",  # GC 1
-    "thread_id_2": "",  # GC 2
-    "messages": "",
-    "delay": 12,
-    "cycle": 35,
-    "break": 40
+    "sessionid1": "", "sessionid2": "",
+    "thread_id1": "", "thread_id2": "",
+    "messages": "", "delay": 12,
+    "cycle": 35, "break": 40
 }
+
 clients = []
 workers = []
 
-# Super undetected devices
+# Super undetected devices (2025 latest – no block)
 DEVICES = [
     {"phone_manufacturer": "Google", "phone_model": "Pixel 8 Pro", "android_version": 15, "android_release": "15.0.0", "app_version": "323.0.0.46.109"},
     {"phone_manufacturer": "Samsung", "phone_model": "SM-S928B", "android_version": 15, "android_release": "15.0.0", "app_version": "324.0.0.41.110"},
     {"phone_manufacturer": "OnePlus", "phone_model": "PJZ110", "android_version": 15, "android_release": "15.0.0", "app_version": "322.0.0.40.108"},
     {"phone_manufacturer": "Xiaomi", "phone_model": "23127PN0CC", "android_version": 15, "android_release": "15.0.0", "app_version": "325.0.0.42.111"},
+    {"phone_manufacturer": "Google", "phone_model": "Pixel 9", "android_version": 15, "android_release": "15.0.0", "app_version": "326.0.0.43.112"},
+    {"phone_manufacturer": "Samsung", "phone_model": "SM-S929B", "android_version": 15, "android_release": "15.0.0", "app_version": "327.0.0.44.113"},
 ]
 
 def log(msg):
@@ -37,14 +38,18 @@ def log(msg):
         status["logs"] = status["logs"][-600:]
 
 def send_message(client, thread_id, message):
-    for _ in range(3):  # 3 retries
+    for _ in range(3): # Retry 3 times
         try:
             client.direct_send(message, thread_ids=[thread_id])
             return True
-        except Exception as e:
-            if "feedback_required" in str(e) or "challenge_required" in str(e):
-                log("Challenge/Feedback detected – skipping message")
-                return False
+        except ChallengeRequired or FeedbackRequired:
+            log("Challenge/Feedback detected – skipping message")
+            return False
+        except PleaseWaitFewMinutes:
+            log("Rate limit detected – waiting 8 min")
+            time.sleep(480)
+            return False
+        except ClientError as e:
             if "pinned" in str(e).lower() or "channels info" in str(e).lower():
                 log("Pinned channels info error – skipping & continuing")
                 return False
@@ -52,23 +57,26 @@ def send_message(client, thread_id, message):
     log("Message send failed after 3 retries")
     return False
 
-def bomber(cl, tid, msgs, gc_number):
+def bomber(cl, tid, msgs, id_number):
     local_sent = 0
+    current_delay = cfg["delay"]
     while status["running"]:
         try:
             msg = random.choice(msgs)
             if send_message(cl, tid, msg):
                 local_sent += 1
                 status["sent"] += 1
-                log(f"[GC {gc_number}] Sent #{status['sent']} → {msg[:50]}")
-           
+                log(f"[ID{id_number}] Sent #{status['sent']} → {msg[:50]}")
+
             if local_sent % cfg["cycle"] == 0:
-                log(f"[GC {gc_number}] Break {cfg['break']}s after {cfg['cycle']} msgs")
+                log(f"[ID{id_number}] Break {cfg['break']}s after {cfg['cycle']} msgs")
                 time.sleep(cfg["break"])
-           
-            time.sleep(cfg["delay"] + random.uniform(-2, 3))
+                current_delay = cfg["delay"]
+
+            time.sleep(current_delay + random.uniform(-2, 3))
         except Exception as e:
-            log(f"[GC {gc_number}] Error → {str(e)[:50]}")
+            log(f"[ID{id_number}] Error → {str(e)[:60]}")
+            current_delay += 5
             time.sleep(20)
 
 @app.route('/', methods=['GET', 'POST'])
@@ -82,22 +90,23 @@ def index():
         workers.clear()
 
         cfg.update({
-            "sessionid": request.form.get('sessionid', '').strip(),
-            "thread_id_1": request.form['thread_id_1'],
-            "thread_id_2": request.form['thread_id_2'],
+            "sessionid1": request.form.get('sessionid1', '').strip(),
+            "sessionid2": request.form.get('sessionid2', '').strip(),
+            "thread_id1": request.form['thread_id1'],
+            "thread_id2": request.form['thread_id2'],
             "messages": request.form['messages'],
             "delay": float(request.form.get('delay', 12)),
             "cycle": int(request.form.get('cycle', 35)),
-            "break": int(request.form.get('break', 40)),
+            "break": int(request.form.get('break', 40))
         })
 
         msgs = [m.strip() for m in cfg["messages"].split('\n') if m.strip()]
 
         status["running"] = True
         status["text"] = "BOMBING ACTIVE"
-        log("SPAMMER STARTED – HAWK SUJAL PRO (2 GCs)")
+        log("SPAMMER STARTED – HAWK SUJAL PRO (2 IDs)")
 
-        for i in range(2):
+        for i in range(1, 3):
             cl = Client()
             device = random.choice(DEVICES)
             cl.set_device(device)
@@ -105,30 +114,8 @@ def index():
             cl.delay_range = [8, 25]
 
             try:
-                cl.login_by_sessionid(cfg["sessionid"])
-                log(f"GC {i+1} → Session ID Login SUCCESS")
+                cl.login_by_sessionid(cfg[f"sessionid{i}"])
+                log(f"ID {i} → Session ID Login SUCCESS")
                 clients.append(cl)
-                tid = cfg[f"thread_id_{i+1}"]
-                t = threading.Thread(target=bomber, args=(cl, tid, msgs, i+1), daemon=True)
-                t.start()
-                workers.append(t)
-            except Exception as e:
-                log(f"GC {i+1} Failed → {str(e)[:90]}")
-
-        status["threads"] = len(clients)
-        if not clients:
-            status["text"] = "ALL LOGIN FAILED"
-            status["running"] = False
-
-    return render_template('index.html', **status, cfg=cfg)
-
-@app.route('/stop')
-def stop():
-    status["running"] = False
-    log("SPAMMER STOPPED BY USER")
-    status["text"] = "STOPPED"
-    return redirect('/')
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port, debug=False)
+                tid = cfg[f"thread_id{i}"]
+                t = threading.Thread(target=bomber, args=(cl,
