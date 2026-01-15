@@ -27,8 +27,6 @@ DEVICES = [
     {"phone_manufacturer": "Samsung", "phone_model": "SM-S928B", "android_version": 15, "android_release": "15.0.0", "app_version": "324.0.0.41.110"},
     {"phone_manufacturer": "OnePlus", "phone_model": "PJZ110", "android_version": 15, "android_release": "15.0.0", "app_version": "322.0.0.40.108"},
     {"phone_manufacturer": "Xiaomi", "phone_model": "23127PN0CC", "android_version": 15, "android_release": "15.0.0", "app_version": "325.0.0.42.111"},
-    {"phone_manufacturer": "Google", "phone_model": "Pixel 9", "android_version": 15, "android_release": "15.0.0", "app_version": "326.0.0.43.112"},
-    {"phone_manufacturer": "Samsung", "phone_model": "SM-S929B", "android_version": 15, "android_release": "15.0.0", "app_version": "327.0.0.44.113"},
 ]
 
 def log(msg):
@@ -37,33 +35,33 @@ def log(msg):
     if len(status["logs"]) > 600:
         status["logs"] = status["logs"][-600:]
 
-def send_message(client, thread_id, message):
+def send_message(client, thread_id, message, id_number):
     for _ in range(3): # Retry 3 times
         try:
             client.direct_send(message, thread_ids=[thread_id])
+            log(f"[ID{id_number}] Message sent successfully")
             return True
         except ChallengeRequired or FeedbackRequired:
-            log("Challenge/Feedback detected – skipping message")
+            log(f"[ID{id_number}] Challenge/Feedback detected – skipping message")
             return False
         except PleaseWaitFewMinutes:
-            log("Rate limit detected – waiting 8 min")
+            log(f"[ID{id_number}] Rate limit detected – waiting 8 min")
             time.sleep(480)
             return False
         except ClientError as e:
             if "pinned" in str(e).lower() or "channels info" in str(e).lower():
-                log("Pinned channels info error – skipping & continuing")
+                log(f"[ID{id_number}] Pinned channels info error – skipping & continuing")
                 return False
             time.sleep(random.uniform(5, 10))
-    log("Message send failed after 3 retries")
+    log(f"[ID{id_number}] Message send failed after 3 retries")
     return False
 
 def bomber(cl, tid, msgs, id_number):
     local_sent = 0
-    current_delay = cfg["delay"]
     while status["running"]:
         try:
             msg = random.choice(msgs)
-            if send_message(cl, tid, msg):
+            if send_message(cl, tid, msg, id_number):
                 local_sent += 1
                 status["sent"] += 1
                 log(f"[ID{id_number}] Sent #{status['sent']} → {msg[:50]}")
@@ -71,12 +69,10 @@ def bomber(cl, tid, msgs, id_number):
             if local_sent % cfg["cycle"] == 0:
                 log(f"[ID{id_number}] Break {cfg['break']}s after {cfg['cycle']} msgs")
                 time.sleep(cfg["break"])
-                current_delay = cfg["delay"]
 
-            time.sleep(current_delay + random.uniform(-2, 3))
+            time.sleep(cfg["delay"] + random.uniform(-2, 3))
         except Exception as e:
-            log(f"[ID{id_number}] Error → {str(e)[:60]}")
-            current_delay += 5
+            log(f"[ID{id_number}] Error → {str(e)[:50]}")
             time.sleep(20)
 
 @app.route('/', methods=['GET', 'POST'])
@@ -104,7 +100,7 @@ def index():
 
         status["running"] = True
         status["text"] = "BOMBING ACTIVE"
-        log("SPAMMER STARTED – HAWK SUJAL PRO (2 IDs)")
+        log("SPAMMER STARTED – HAWK SUJAL PRO (2 IDs, 2 GCs)")
 
         for i in range(1, 3):
             cl = Client()
@@ -118,4 +114,25 @@ def index():
                 log(f"ID {i} → Session ID Login SUCCESS")
                 clients.append(cl)
                 tid = cfg[f"thread_id{i}"]
-                t = threading.Thread(target=bomber, args=(cl,
+                t = threading.Thread(target=bomber, args=(cl, tid, msgs, i), daemon=True)
+                t.start()
+                workers.append(t)
+            except Exception as e:
+                log(f"ID {i} Failed → {str(e)[:90]}")
+
+        if not clients:
+            status["text"] = "ALL LOGIN FAILED"
+            status["running"] = False
+
+    return render_template('index.html', **status, cfg=cfg)
+
+@app.route('/stop')
+def stop():
+    status["running"] = False
+    log("SPAMMER STOPPED BY USER")
+    status["text"] = "STOPPED"
+    return redirect('/')
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port, debug=False)
